@@ -12,6 +12,7 @@ import threading
 import contextlib
 
 from lxml import etree
+from BeautifulSoup import BeautifulSoup
 
 
 class FoafSpider(threading.Thread):
@@ -32,47 +33,86 @@ class FoafSpider(threading.Thread):
         self.queue = queue
         self.foafs = foafs
 
-    def run(self):
+    def get(self, url):
 
-        while True:
-            url = self.queue.get()
-            now = datetime.datetime.now()
+        try:
+            request = urllib2.Request(url)
+            request.add_header("User-Agent", self.AGENT)
+            context = contextlib.closing(urllib2.urlopen(request))
+        except urllib2.HTTPError:
+            self.log("404. Skipping...")
+            context = False
+            pass
 
-            try:
-                request = urllib2.Request(url)
-                request.add_header("User-Agent", self.AGENT)
-                context = contextlib.closing(urllib2.urlopen(request))
-            except urllib2.HTTPError:
-                print "404, ignore this"
-                self.queue.task_done()
+        return context
+
+    def process(self, url):
+
+        with_bs = False
+        with self.get(url) as foafdata:
+            if not foafdata:
                 return
 
-            with context as foafdata:
-                tree = etree.parse(foafdata)
-                sha1 = tree.xpath('//foaf:Person/foaf:mbox_sha1sum', namespaces=self.NS)
-                if len(sha1) == 0:
-                    print "No FOAF here...Skipping."
-                    self.queue.task_done()
-                    return
+            tree = etree.parse(foafdata)
+            sha1 = tree.xpath('//foaf:Person/foaf:mbox_sha1sum', namespaces=self.NS)
+            if len(sha1) == 0:
 
-                user = self.get_user(url)
+                # FOAF document does not have mbox_sha1sum... try get it from html instead
+                with self.get('http://%s.insanejournal.com/' % self.get_user(url)) as htmldata:
+                    soup = BeautifulSoup(htmldata)
+                    tags = soup('meta', {'content': re.compile("foaf:mbox_sha1sum '([0-9a-f]{40})'")})
+                    for tag in tags:
+                        srch = re.search("'([a-f0-9]{40})'", tag['content'])
+                        mbox = srch.group(1)
+                        break
+
+                    with_bs = True
+
+            else:
                 mbox = sha1[0].text
-                self.foafs[user] = mbox
+
+            user = self.get_user(url)
+            self.foafs[user] = mbox
 
             friends = tree.xpath('//foaf:Person/foaf:knows/foaf:Person', namespaces=self.NS)
             overlap = 0
             for friend in friends:
                 foaf = friend.find('{%(rdfs)s}seeAlso' % self.NS).attrib.itervalues().next()
-                #print "enqueuing %s" % self.get_user(foaf)
-                foafuser = self.get_user(foaf)
-                if foafuser in self.foafs:
+
+                # Only add new foaf usernames
+                if self.get_user(foaf) not in self.foafs:
                     overlap += 1
-                    #print "%s already processed" % foafuser
-                else:
                     self.queue.put(foaf)
 
-            #time.sleep(random.randint(1, 2)) %03.2f {:03.2f}
-            print "%s | %s: %-20s (%3d/%3d friends, %3d foaf[s], %4d in queue)" % (now.strftime('%Y-%m-%d %H:%M:%S'), mbox, user, len(friends)-overlap, len(friends), len(self.foafs), self.queue.qsize())
+            self.log("%s: %-20s %-2s(%3d/%3d new, %3d foaf[s], %4d in queue)" % (
+                mbox,                    # sha1
+                user,                    # username
+                '*' if with_bs else '',  # marker to show that we got it with BeautifulSoup, not XPath
+                overlap,                 # unique friends (added)
+                len(friends),            # total friends
+                len(self.foafs),         # number we have processed
+                self.queue.qsize()       # current queue size
+            ))
+
+        return True
+
+    def log(self, line):
+
+        now = datetime.datetime.now()
+        print "%s (%s) | %s" % (
+            now.strftime('%Y-%m-%d %H:%M:%S'),
+            threading.currentThread().name,
+            line
+        )
+
+    def run(self):
+
+        while True:
+
+            url = self.queue.get()
+            if self.get_user(url) not in self.foafs:
+                self.process(url)
+
             self.queue.task_done()
 
     @staticmethod
@@ -98,7 +138,7 @@ class FoafSpider(threading.Thread):
 
 if __name__ == "__main__":
 
-    threads = 8
+    threads = 9
     parser = optparse.OptionParser()
     opts, args = parser.parse_args()
     if not args:
@@ -112,9 +152,9 @@ if __name__ == "__main__":
     try:
         for i in range(threads):
             t = FoafSpider(queue, foafs)
-            t.setDaemon(True)
+            #t.setDaemon(True)
             t.start()
-            t.join(5)
+            #t.join(5)
 
         queue.join()
 
