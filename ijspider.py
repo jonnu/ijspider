@@ -15,6 +15,18 @@ from lxml import etree
 from BeautifulSoup import BeautifulSoup
 
 
+class FoafQueue(Queue.Queue):
+
+    def __init__(self, maxsize=0):
+        Queue.Queue.__init__(self, maxsize)
+        self.items = set()
+
+    def _put(self, item):
+        if item not in self.items:
+            Queue.Queue._put(self, item)
+            self.items.add(item)
+
+
 class FoafSpider(threading.Thread):
 
     NS = {
@@ -82,7 +94,7 @@ class FoafSpider(threading.Thread):
                 # Only add new foaf usernames
                 if self.get_user(foaf) not in self.foafs:
                     overlap += 1
-                    self.queue.put(foaf)
+                    self.queue.put(foaf, True, 0.1)
 
             self.log("%s: %-20s %-2s(%3d/%3d new, %3d foaf[s], %4d in queue)" % (
                 mbox,                    # sha1
@@ -109,7 +121,11 @@ class FoafSpider(threading.Thread):
 
         while True:
 
-            url = self.queue.get()
+            try:
+                url = self.queue.get()
+            except Queue.Empty:
+                return
+
             if self.get_user(url) not in self.foafs:
                 self.process(url)
 
@@ -146,15 +162,14 @@ if __name__ == "__main__":
 
     start = time.time()
     foafs = {}
-    queue = Queue.Queue()
+    queue = FoafQueue()
     queue.put(FoafSpider.make_url(args[0]))
 
     try:
         for i in range(threads):
             t = FoafSpider(queue, foafs)
-            #t.setDaemon(True)
+            t.setDaemon(True)
             t.start()
-            #t.join(5)
 
         queue.join()
 
