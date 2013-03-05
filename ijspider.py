@@ -12,6 +12,7 @@ import threading
 import contextlib
 
 from lxml import etree
+from httplib import BadStatusLine
 from BeautifulSoup import BeautifulSoup
 
 
@@ -53,6 +54,10 @@ class FoafSpider(threading.Thread):
             context = contextlib.closing(urllib2.urlopen(request))
         except urllib2.HTTPError:
             self.log("404. Skipping...")
+            context = False
+            pass
+        except BadStatusLine:
+            self.log("Bad status returned. Skipping...")
             context = False
             pass
 
