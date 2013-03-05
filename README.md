@@ -22,3 +22,9 @@ todo
  * get threads to listen to some event for shutdown
  * improve performance, fix queue locking get/put mess 
  * investigate zeromq, multiprocessing and similar
+
+example
+-------
+
+`py ijspider.py <username> | egrep --line-buffered --color "<sha1hash>|$"`
+
