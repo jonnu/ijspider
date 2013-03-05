@@ -38,7 +38,7 @@ class FoafSpider(threading.Thread):
         'dc': 'http://purl.org/dc/elements/1.1/'
     }
 
-    AGENT = 'Mozilla/6.0 (Windows NT 6.2; WOW64; rv:16.0.1) Gecko/20121011 Firefox/16.0.1'
+    AGENT = 'https://github.com/jonnu/ijspider; code@jonnu.eu'
 
     def __init__(self, queue, foafs):
         threading.Thread.__init__(self)
